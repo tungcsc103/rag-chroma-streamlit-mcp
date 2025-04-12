@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data/chromadb:/data
+      - ../data/chromadb:/data
     environment:
       - CHROMA_SERVER_HOST=0.0.0.0
       - CHROMA_SERVER_PORT=8000
@@ -24,14 +24,14 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - ./logs:/app/logs
+      - ../logs:/app/logs
     environment:
       - API_HOST=0.0.0.0
       - API_PORT=8001
       - CHROMA_HOST=chroma-db
       - CHROMA_PORT=8000
       - CHROMA_AUTH_TOKEN=your-secret-api-key
-      - EMBEDDING_MODEL=all-MiniLM-L6-v2
+      - EMBEDDING_MODEL=all-MiniLM-L6-v2  # BAAI/bge-base-en-v1.5      
     depends_on:
       - chroma-db
     restart: unless-stopped
