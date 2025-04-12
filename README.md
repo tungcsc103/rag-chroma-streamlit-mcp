@@ -2,6 +2,10 @@
 
 This project implements a local Retrieval-Augmented Generation (RAG) system using LangChain, ChromaDB, and Streamlit.
 
+## System Design
+
+![RAG System Design](design.png)
+
 ## Running with Docker (Recommended)
 
 1. Clone the repository:
@@ -46,35 +50,36 @@ To use this RAG system with Claude Desktop, you'll need to configure the Chroma 
 
 Add the following to your `claude_desktop_config.json`:
 ```json
-"chroma": {
-    "command": "uvx",
+{
+  "chroma_host": {
+    "command": "<path-to-venv>/chroma-mcp/venv/bin/chroma-mcp",
     "args": [
-        "chroma-mcp",
-        "--client-type",
-        "http",
-        "--host",
-        "localhost",
-        "--port",
-        "8000"
-    ]
+      "--client-type", "http",
+      "--host", "127.0.0.1",
+      "--port", "8000",
+      "--ssl", "false",
+      "--custom-auth-credentials", "your-secret-api-key"
+    ],
+    "cwd": "<path-to-project>/chroma-mcp"
+  }
 }
 ```
 
-This configuration will connect to your locally running ChromaDB instance through Docker.
+Replace `<path-to-venv>` and `<path-to-project>` with your actual paths. This configuration will connect to your locally running ChromaDB instance through Docker.
 
 ### 2. Using Persistent Storage
 
 For persistent data storage:
 ```json
-"chroma": {
-    "command": "uvx",
+{
+  "chroma_host": {
+    "command": "<path-to-venv>/chroma-mcp/venv/bin/chroma-mcp",
     "args": [
-        "chroma-mcp",
-        "--client-type",
-        "persistent",
-        "--data-dir",
-        "/full/path/to/your/data/directory"
-    ]
+      "--client-type", "persistent",
+      "--data-dir", "<path-to-data>/chroma_data"
+    ],
+    "cwd": "<path-to-project>/chroma-mcp"
+  }
 }
 ```
 
@@ -82,19 +87,17 @@ For persistent data storage:
 
 To connect to Chroma Cloud:
 ```json
-"chroma": {
-    "command": "uvx",
+{
+  "chroma_host": {
+    "command": "<path-to-venv>/chroma-mcp/venv/bin/chroma-mcp",
     "args": [
-        "chroma-mcp",
-        "--client-type",
-        "cloud",
-        "--tenant",
-        "your-tenant-id",
-        "--database",
-        "your-database-name",
-        "--api-key",
-        "your-api-key"
-    ]
+      "--client-type", "cloud",
+      "--tenant", "your-tenant-id",
+      "--database", "your-database-name",
+      "--api-key", "your-api-key"
+    ],
+    "cwd": "<path-to-project>/chroma-mcp"
+  }
 }
 ```
 
@@ -106,7 +109,7 @@ You can also use environment variables for configuration. Create a `.env` file:
 CHROMA_CLIENT_TYPE="http"  # or "cloud", "persistent"
 
 # For persistent client
-CHROMA_DATA_DIR="/full/path/to/your/data/directory"
+CHROMA_DATA_DIR="<path-to-data>/chroma_data"
 
 # For cloud client (Chroma Cloud)
 CHROMA_TENANT="your-tenant-id"
@@ -114,21 +117,26 @@ CHROMA_DATABASE="your-database-name"
 CHROMA_API_KEY="your-api-key"
 
 # For HTTP client (self-hosted)
-CHROMA_HOST="localhost"
+CHROMA_HOST="127.0.0.1"
 CHROMA_PORT="8000"
+CHROMA_SSL="false"
+CHROMA_CUSTOM_AUTH_CREDENTIALS="your-secret-api-key"
 ```
 
 Then specify the path in your Claude Desktop config:
 ```json
-"chroma": {
-    "command": "uvx",
+{
+  "chroma_host": {
+    "command": "<path-to-venv>/chroma-mcp/venv/bin/chroma-mcp",
     "args": [
-        "chroma-mcp",
-        "--dotenv-path",
-        "/path/to/your/.env"
-    ]
+      "--dotenv-path", "<path-to-env>/.env"
+    ],
+    "cwd": "<path-to-project>/chroma-mcp"
+  }
 }
 ```
+
+Note: Replace all `<path-to-*>` placeholders with your actual paths.
 
 ## Local Development Setup
 
