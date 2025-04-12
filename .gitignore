@@ -34,4 +34,14 @@ ENV/
 # OS
 .DS_Store
 .env
-.env.local 
+.env.local
+
+# Data and Logs
+data/
+logs/
+*.db
+*.sqlite
+*.sqlite3
+chroma.sqlite3
+index_data/
+embeddings_data/ 
