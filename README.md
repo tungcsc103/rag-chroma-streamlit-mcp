@@ -12,9 +12,8 @@ cd rag-mcp-chroma-streamlit
 
 2. Create a `.env` file in the project root with your configuration:
 ```env
-# OpenAI Configuration
-OPENAI_API_KEY=your_api_key_here
-OPENAI_MODEL=gpt-3.5-turbo  # or gpt-4
+# Embedding Model Configuration
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2  # Default embedding model
 
 # ChromaDB Configuration
 CHROMA_SERVER_HOST=chroma-db
@@ -211,8 +210,7 @@ streamlit run src/frontend/app.py
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENAI_API_KEY` | Your OpenAI API key | Required |
-| `OPENAI_MODEL` | OpenAI model to use | gpt-3.5-turbo |
+| `EMBEDDING_MODEL` | Sentence Transformer model to use | sentence-transformers/all-MiniLM-L6-v2 |
 | `CHROMA_SERVER_HOST` | ChromaDB server host | chroma-db |
 | `CHROMA_SERVER_PORT` | ChromaDB server port | 8000 |
 | `BACKEND_HOST` | Backend service host | 0.0.0.0 |
