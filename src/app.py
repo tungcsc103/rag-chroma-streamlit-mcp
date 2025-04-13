@@ -46,7 +46,7 @@ def get_supported_formats():
         st.warning(f"Error connecting to API: {str(e)}")
     
     # Default formats if API call fails
-    default_formats = ["pdf", "doc", "docx", "txt", "md", "csv"]
+    default_formats = ["pdf", "doc", "docx", "txt", "md", "csv", "epub"]
     return default_formats
 
 def main():
@@ -102,11 +102,15 @@ def show_upload_page():
                             result = response.json()
                             st.success(f"Successfully uploaded {file.name}")
                             
-                            # Show document metadata in an expander
+                            # Show document details in an expander
                             with st.expander(f"Document Details - {file.name}"):
-                                st.json(result["metadata"])
+                                if "document_id" in result:
+                                    st.write(f"Document ID: {result['document_id']}")
+                                if "message" in result:
+                                    st.write(f"Status: {result['message']}")
                         else:
-                            st.error(f"Failed to upload {file.name}: {response.text}")
+                            error_detail = response.json().get('detail', 'Unknown error')
+                            st.error(f"Failed to upload {file.name}: {error_detail}")
                     except Exception as e:
                         st.error(f"Error uploading {file.name}: {str(e)}")
                         

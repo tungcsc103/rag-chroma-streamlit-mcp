@@ -1,4 +1,4 @@
-from typing import BinaryIO, Dict, List
+from typing import BinaryIO, Dict, List, Any, Union
 import PyPDF2
 from docx import Document
 import io
@@ -8,42 +8,100 @@ import tempfile
 import os
 import shutil
 from .text_splitter import TextChunker
+import ebooklib
+from ebooklib import epub
+from bs4 import BeautifulSoup
+import logging
+from pathlib import Path
+import uuid
 
 class DocumentProcessor:
     def __init__(self):
         """Initialize document processor with text chunker."""
         self.text_chunker = TextChunker()
+        self.supported_extensions = {'.pdf', '.docx', '.doc', '.txt', '.epub'}
 
-    @staticmethod
-    def process_document(file: BinaryIO, filename: str) -> Dict[str, str]:
-        """
-        Process different types of documents and extract their text content.
+    def process_document(self, file_path: str, file_name: str) -> Dict[str, Any]:
+        """Process a document and return its content and metadata."""
+        file_extension = Path(file_name).suffix.lower()
         
-        Args:
-            file: File-like object containing the document
-            filename: Name of the file
+        if file_extension not in self.supported_extensions:
+            raise ValueError(f"Unsupported file format: {file_extension}")
+        
+        try:
+            if file_extension == '.pdf':
+                return self._process_pdf(file_path, file_name)
+            elif file_extension == '.docx':
+                return self._process_word(file_path, file_name)
+            elif file_extension == '.doc':
+                return self._process_old_word(file_path, file_name)
+            elif file_extension == '.txt':
+                return self._process_text(file_path, file_name)
+            elif file_extension == '.epub':
+                return self._process_epub(file_path, file_name)
+        except Exception as e:
+            logging.error(f"Error processing document {file_name}: {str(e)}")
+            raise
+
+    def _process_epub(self, file_path: str, file_name: str) -> Dict[str, Any]:
+        """Process an EPUB file and extract its content and metadata."""
+        try:
+            book = epub.read_epub(file_path)
             
-        Returns:
-            Dict containing extracted text and metadata
-        """
-        processor = DocumentProcessor()
-        file_extension = filename.lower().split('.')[-1]
-        
-        if file_extension == 'pdf':
-            return processor._process_pdf(file)
-        elif file_extension == 'docx':
-            return processor._process_word(file)
-        elif file_extension == 'doc':
-            return processor._process_old_word(file, filename)
-        elif file_extension in ['txt', 'md', 'csv']:
-            return processor._process_text(file)
-        else:
-            raise ValueError(f"Unsupported file type: {file_extension}")
+            # Extract metadata with safe defaults
+            metadata = {
+                'filename': file_name,
+                'file_type': 'epub',
+                'document_id': str(uuid.uuid4()),
+                'title': file_name,  # default to filename
+                'author': 'Unknown',
+                'language': 'Unknown'
+            }
+            
+            # Safely extract metadata from the book
+            try:
+                if book.get_metadata('DC', 'title'):
+                    metadata['title'] = str(book.get_metadata('DC', 'title')[0][0])
+                if book.get_metadata('DC', 'creator'):
+                    metadata['author'] = str(book.get_metadata('DC', 'creator')[0][0])
+                if book.get_metadata('DC', 'language'):
+                    metadata['language'] = str(book.get_metadata('DC', 'language')[0][0])
+            except Exception as e:
+                logging.warning(f"Error extracting some metadata from EPUB: {str(e)}")
+            
+            # Extract content from all chapters
+            content = []
+            for item in book.get_items():
+                if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                    # Parse HTML content
+                    soup = BeautifulSoup(item.get_content(), 'html.parser')
+                    # Remove script and style elements
+                    for script in soup(["script", "style"]):
+                        script.decompose()
+                    # Get text and normalize whitespace
+                    text = soup.get_text(separator=' ').strip()
+                    if text:
+                        content.append(text)
+            
+            # Join all content with newlines
+            full_text = '\n\n'.join(content)
+            
+            # Split text into chunks
+            chunks = self.text_chunker.split_text(full_text, metadata)
+            
+            return {
+                'chunks': chunks,
+                'metadata': metadata
+            }
+            
+        except Exception as e:
+            logging.error(f"Error processing EPUB file {file_name}: {str(e)}")
+            raise ValueError(f"Error processing EPUB file: {str(e)}")
 
-    def _process_pdf(self, file: BinaryIO) -> Dict[str, str]:
+    def _process_pdf(self, file_path: str, file_name: str) -> Dict[str, str]:
         """Process PDF files and extract text."""
         try:
-            pdf_reader = PyPDF2.PdfReader(file)
+            pdf_reader = PyPDF2.PdfReader(file_path)
             text_content = []
             metadata = {
                 "title": pdf_reader.metadata.get("/Title", ""),
@@ -72,10 +130,10 @@ class DocumentProcessor:
         except Exception as e:
             raise ValueError(f"Error processing PDF: {str(e)}")
 
-    def _process_word(self, file: BinaryIO) -> Dict[str, str]:
+    def _process_word(self, file_path: str, file_name: str) -> Dict[str, str]:
         """Process Word documents and extract text."""
         try:
-            temp_file = io.BytesIO(file.read())
+            temp_file = io.BytesIO(file_path)
             doc = Document(temp_file)
             text_content = []
             
@@ -116,7 +174,7 @@ class DocumentProcessor:
         except Exception as e:
             raise ValueError(f"Error processing Word document: {str(e)}")
 
-    def _process_old_word(self, file: BinaryIO, filename: str) -> Dict[str, str]:
+    def _process_old_word(self, file_path: str, file_name: str) -> Dict[str, str]:
         """Process old Word (.doc) documents using LibreOffice."""
         try:
             temp_base = os.getenv('TMPDIR', '/tmp/libreoffice')
@@ -128,7 +186,7 @@ class DocumentProcessor:
             
             try:
                 with open(temp_input, 'wb') as f:
-                    content = file.read()
+                    content = file_path
                     f.write(content)
                 os.chmod(temp_input, 0o666)
                 
@@ -179,10 +237,10 @@ class DocumentProcessor:
         except Exception as e:
             raise ValueError(f"Error processing Word 97-2004 document: {str(e)}")
 
-    def _process_text(self, file: BinaryIO) -> Dict[str, str]:
+    def _process_text(self, file_path: str, file_name: str) -> Dict[str, str]:
         """Process text files and extract content."""
         try:
-            content = file.read().decode('utf-8')
+            content = file_path.read().decode('utf-8')
             metadata = {}
             
             # Split text into chunks
@@ -198,4 +256,4 @@ class DocumentProcessor:
     @staticmethod
     def get_supported_extensions() -> list:
         """Return list of supported file extensions."""
-        return ['pdf', 'doc', 'docx', 'txt', 'md', 'csv'] 
+        return ['pdf', 'doc', 'docx', 'txt', 'md', 'csv', 'epub'] 

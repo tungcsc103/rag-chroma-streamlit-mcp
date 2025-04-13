@@ -6,6 +6,8 @@ import stat
 from typing import List, Dict, Optional, Union
 from chromadb.utils import embedding_functions
 from dotenv import load_dotenv
+import uuid
+import time
 
 # Load environment variables
 load_dotenv()
@@ -46,19 +48,28 @@ class ChromaDBManager:
         self._ensure_directory_permissions()
         
         try:
-            # Initialize ChromaDB client with HTTP connection
-            settings = Settings(
-                chroma_api_impl="rest",
-                chroma_server_host=chroma_host,
-                chroma_server_http_port=chroma_port,
-                anonymized_telemetry=False
-            )
-
-            self.client = chromadb.HttpClient(
-                host=chroma_host,
-                port=chroma_port,
-                settings=settings
-            )
+            # Initialize base settings
+            settings = Settings()
+            
+            # Get auth credentials from environment
+            auth_credentials = os.getenv("CHROMA_AUTH_TOKEN")
+            
+            # Configure authentication if credentials are provided
+            if auth_credentials:
+                settings = Settings(
+                    chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
+                    chroma_client_auth_credentials=auth_credentials
+                )
+            
+            try:
+                self.client = chromadb.HttpClient(
+                    host=chroma_host,
+                    port=chroma_port,
+                    settings=settings
+                )
+            except Exception as e:
+                print(f"Error connecting to HTTP client: {str(e)}")
+                raise
             
             # Use sentence-transformers for embeddings
             self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
@@ -130,69 +141,65 @@ class ChromaDBManager:
             print(f"Error fixing permissions: {str(e)}")
             raise
 
-    def add_document_chunks(
-        self,
-        chunks: List[Dict],
-        document_id: str,
-        base_metadata: Optional[Dict] = None
-    ) -> None:
-        """
-        Add document chunks to the collection.
-        
-        Args:
-            chunks: List of document chunks with their metadata
-            document_id: Unique identifier for the document
-            base_metadata: Base metadata for the document
-        """
-        if not chunks:
-            raise ValueError("No chunks provided")
-            
-        if base_metadata is None:
-            base_metadata = {}
-            
+    def add_document_chunks(self, chunks: List[Dict], document_id: Optional[str] = None, base_metadata: Optional[Dict] = None) -> str:
+        """Add document chunks to the collection."""
         try:
+            if not chunks:
+                raise ValueError("No chunks provided")
+            
+            # Generate document ID if not provided
+            if not document_id:
+                document_id = str(uuid.uuid4())
+            
+            # Initialize lists for ChromaDB
             texts = []
             metadatas = []
             ids = []
             
-            for i, chunk in enumerate(chunks):
-                chunk_text = chunk["text"]
-                chunk_metadata = chunk["metadata"]
-                
+            # Process each chunk
+            for chunk in chunks:
                 # Combine base metadata with chunk metadata
-                combined_metadata = {
-                    **base_metadata,
-                    **chunk_metadata,
-                    "document_id": document_id  # Link chunk to parent document
+                metadata = {
+                    **(base_metadata or {}),
+                    **(chunk.get('metadata', {}))
                 }
                 
-                # Generate chunk ID using the chunk_index from metadata
-                chunk_id = f"{document_id}_chunk_{chunk_metadata.get('chunk_index', i)}"
+                # Convert None values to empty strings in metadata
+                processed_metadata = {
+                    k: str(v) if v is not None else ""
+                    for k, v in metadata.items()
+                }
                 
-                texts.append(chunk_text)
-                metadatas.append(combined_metadata)
-                ids.append(chunk_id)
+                texts.append(chunk['text'])
+                metadatas.append(processed_metadata)
+                ids.append(f"{document_id}_chunk_{chunk.get('chunk_index', len(ids))}")
             
-            print(f"Adding {len(texts)} chunks for document {document_id}...")
-            self.collection.add(
-                documents=texts,
-                metadatas=metadatas,
-                ids=ids
-            )
-            print(f"Successfully added {len(texts)} chunks")
+            print(f"Adding {len(chunks)} chunks for document {document_id}...")
             
-        except Exception as e:
-            print(f"Error adding document chunks: {str(e)}")
-            if "readonly database" in str(e).lower():
-                self._fix_permissions()
-                print("Retrying chunk addition after fixing permissions...")
+            # Add chunks to ChromaDB
+            try:
                 self.collection.add(
                     documents=texts,
                     metadatas=metadatas,
                     ids=ids
                 )
-            else:
-                raise
+            except Exception as e:
+                if "readonly database" in str(e).lower():
+                    # Retry once if database is in readonly mode
+                    time.sleep(1)
+                    self.collection.add(
+                        documents=texts,
+                        metadatas=metadatas,
+                        ids=ids
+                    )
+                else:
+                    raise
+            
+            return document_id
+            
+        except Exception as e:
+            print(f"Error adding document chunks: {str(e)}")
+            raise
 
     def query_documents(
         self,

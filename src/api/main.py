@@ -8,6 +8,9 @@ from database.chroma_setup import ChromaDBManager
 from utils.document_processor import DocumentProcessor
 import uuid
 from datetime import datetime
+from pathlib import Path
+import tempfile
+import logging
 
 # Load environment variables
 load_dotenv()
@@ -54,7 +57,8 @@ async def root():
         "docx": "Microsoft Word documents",
         "txt": "Plain text files",
         "md": "Markdown documents",
-        "csv": "Comma-separated values"
+        "csv": "Comma-separated values",
+        "epub": "Electronic publication format (eBooks)"
     }
     
     return {
@@ -66,48 +70,54 @@ async def root():
     }
 
 @app.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
-    """Upload and process a document into chunks."""
+async def upload_document(file: UploadFile):
+    """
+    Upload and process a document.
+    Supports PDF, DOCX, DOC, TXT, and EPUB files.
+    """
     try:
         # Validate file extension
-        file_extension = file.filename.lower().split('.')[-1]
-        if file_extension not in DocumentProcessor.get_supported_extensions():
+        file_extension = Path(file.filename).suffix.lower()
+        if file_extension not in doc_processor.supported_extensions:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type. Supported types: {', '.join(DocumentProcessor.get_supported_extensions())}"
+                detail=f"Unsupported file type. Supported types: {', '.join(doc_processor.supported_extensions)}"
             )
 
-        # Process the document
-        doc_content = doc_processor.process_document(file.file, file.filename)
-        
-        # Generate a unique ID for the document
-        doc_id = str(uuid.uuid4())
-        
-        # Create base metadata for the document
-        base_metadata = {
-            "filename": file.filename,
-            "content_type": file.content_type,
-            "upload_timestamp": str(datetime.now()),
-            "file_type": file_extension,
-            **doc_content.get("metadata", {})
-        }
-        
-        # Add chunks to ChromaDB
-        db_manager.add_document_chunks(
-            chunks=doc_content["chunks"],
-            document_id=doc_id,
-            base_metadata=base_metadata
-        )
-        
-        return {
-            "message": f"Successfully uploaded and processed {file.filename}",
-            "document_id": doc_id,
-            "metadata": base_metadata,
-            "chunk_count": len(doc_content["chunks"])
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Create a temporary file to store the uploaded content
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file.flush()
+            
+            # Process the document
+            try:
+                result = doc_processor.process_document(temp_file.name, file.filename)
+                
+                # Add chunks to ChromaDB
+                if result.get('chunks'):
+                    document_id = db_manager.add_document_chunks(
+                        chunks=result['chunks'],
+                        document_id=None,  # Let ChromaDB generate an ID
+                        base_metadata=result.get('metadata', {})
+                    )
+                    return {
+                        "message": "Document processed successfully",
+                        "document_id": document_id,
+                        "status": "success"
+                    }
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No content could be extracted from the document"
+                    )
+                    
+            finally:
+                # Clean up the temporary file
+                os.unlink(temp_file.name)
+                
     except Exception as e:
+        logging.error(f"Error processing upload: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/query", response_model=QueryResponse)
