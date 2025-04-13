@@ -31,7 +31,7 @@ services:
       - CHROMA_HOST=chroma-db
       - CHROMA_PORT=8000
       - CHROMA_AUTH_TOKEN=your-secret-api-key
-      - EMBEDDING_MODEL=all-MiniLM-L6-v2  # BAAI/bge-base-en-v1.5      
+      - EMBEDDING_MODEL=BAAI/bge-base-en-v1.5
     depends_on:
       - chroma-db
     restart: unless-stopped

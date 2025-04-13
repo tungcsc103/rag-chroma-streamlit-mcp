@@ -8,5 +8,6 @@ pydantic>=2.5.0
 python-multipart>=0.0.6
 tiktoken>=0.5.2
 PyPDF2>=3.0.0
+pypdf2==3.0.1
 python-docx>=1.0.1
 unstructured>=0.12.0 

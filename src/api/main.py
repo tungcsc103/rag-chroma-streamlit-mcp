@@ -13,7 +13,7 @@ from datetime import datetime
 load_dotenv()
 
 # API Configuration
-API_PORT = int(os.getenv("API_PORT", "8001"))  # Default to port 8001 if not specified
+API_PORT = int(os.getenv("API_PORT", "8001"))
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 
 app = FastAPI(
@@ -22,8 +22,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Initialize ChromaDB
+# Initialize ChromaDB and Document Processor
 db_manager = ChromaDBManager()
+doc_processor = DocumentProcessor()
 
 # Add CORS middleware
 app.add_middleware(
@@ -37,18 +38,15 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     query: str
     top_k: Optional[int] = 3
+    group_by_document: Optional[bool] = True
 
 class QueryResponse(BaseModel):
     query: str
-    documents: List[str]
-    metadata: List[Dict]
-    distances: List[float]
+    results: List[Dict]
 
 @app.get("/")
 async def root():
-    """
-    Root endpoint that provides API information and supported file formats.
-    """
+    """Root endpoint that provides API information and supported file formats."""
     supported_formats = DocumentProcessor.get_supported_extensions()
     format_descriptions = {
         "pdf": "Adobe PDF documents",
@@ -69,9 +67,7 @@ async def root():
 
 @app.post("/upload")
 async def upload_document(file: UploadFile = File(...)):
-    """
-    Upload a document to be processed and stored in the vector database.
-    """
+    """Upload and process a document into chunks."""
     try:
         # Validate file extension
         file_extension = file.filename.lower().split('.')[-1]
@@ -82,13 +78,13 @@ async def upload_document(file: UploadFile = File(...)):
             )
 
         # Process the document
-        doc_content = DocumentProcessor.process_document(file.file, file.filename)
+        doc_content = doc_processor.process_document(file.file, file.filename)
         
         # Generate a unique ID for the document
         doc_id = str(uuid.uuid4())
         
-        # Create metadata for the document
-        metadata = {
+        # Create base metadata for the document
+        base_metadata = {
             "filename": file.filename,
             "content_type": file.content_type,
             "upload_timestamp": str(datetime.now()),
@@ -96,17 +92,18 @@ async def upload_document(file: UploadFile = File(...)):
             **doc_content.get("metadata", {})
         }
         
-        # Add to ChromaDB
-        db_manager.add_documents(
-            texts=[doc_content["text"]],
-            metadatas=[metadata],
-            ids=[doc_id]
+        # Add chunks to ChromaDB
+        db_manager.add_document_chunks(
+            chunks=doc_content["chunks"],
+            document_id=doc_id,
+            base_metadata=base_metadata
         )
         
         return {
-            "message": f"Successfully uploaded {file.filename}",
+            "message": f"Successfully uploaded and processed {file.filename}",
             "document_id": doc_id,
-            "metadata": metadata
+            "metadata": base_metadata,
+            "chunk_count": len(doc_content["chunks"])
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -115,29 +112,48 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
-    """
-    Query the RAG system with a question.
-    """
+    """Query the RAG system with semantic search."""
     try:
         results = db_manager.query_documents(
             query_text=request.query,
-            n_results=request.top_k
+            n_results=request.top_k,
+            group_by_document=request.group_by_document
         )
         
-        return {
-            "query": request.query,
-            "documents": results["documents"],
-            "metadata": results["metadatas"],
-            "distances": results["distances"]
-        }
+        if request.group_by_document:
+            return {
+                "query": request.query,
+                "results": results["results"]
+            }
+        else:
+            # Format non-grouped results
+            return {
+                "query": request.query,
+                "results": [{
+                    "text": doc,
+                    "metadata": meta,
+                    "distance": dist
+                } for doc, meta, dist in zip(
+                    results["documents"],
+                    results["metadatas"],
+                    results["distances"]
+                )]
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/documents/{document_id}")
+async def delete_document(document_id: str):
+    """Delete a document and all its chunks."""
+    try:
+        db_manager.delete_document(document_id)
+        return {"message": f"Successfully deleted document {document_id}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stats")
 async def get_stats():
-    """
-    Get statistics about the document collection.
-    """
+    """Get statistics about the document collection."""
     try:
         stats = db_manager.get_collection_stats()
         return stats

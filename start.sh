@@ -93,7 +93,7 @@ export CHROMA_HOST="localhost"
 export CHROMA_PORT="8000"
 export API_HOST="localhost"
 export API_PORT="8001"
-export EMBEDDING_MODEL="all-MiniLM-L6-v2"
+export EMBEDDING_MODEL="BAAI/bge-base-en-v1.5"
 
 # Start backend service in the background
 echo "Starting backend service..."

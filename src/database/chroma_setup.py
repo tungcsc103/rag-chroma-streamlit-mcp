@@ -3,7 +3,7 @@ from chromadb.config import Settings
 import os
 import shutil
 import stat
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 from chromadb.utils import embedding_functions
 from dotenv import load_dotenv
 
@@ -22,7 +22,7 @@ class ChromaDBManager:
         # Get ChromaDB connection settings from environment
         chroma_host = os.getenv("CHROMA_HOST", "localhost")
         chroma_port = os.getenv("CHROMA_PORT", "8000")
-        embedding_model = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+        embedding_model = os.getenv("EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5")
 
         print(f"Connecting to ChromaDB at {chroma_host}:{chroma_port}")
         print(f"Using embedding model: {embedding_model}")
@@ -130,42 +130,62 @@ class ChromaDBManager:
             print(f"Error fixing permissions: {str(e)}")
             raise
 
-    def add_documents(
+    def add_document_chunks(
         self,
-        texts: List[str],
-        metadatas: Optional[List[Dict]] = None,
-        ids: Optional[List[str]] = None
+        chunks: List[Dict],
+        document_id: str,
+        base_metadata: Optional[Dict] = None
     ) -> None:
         """
-        Add documents to the collection
+        Add document chunks to the collection.
         
         Args:
-            texts (List[str]): List of document texts to add
-            metadatas (List[Dict], optional): Metadata for each document
-            ids (List[str], optional): Custom IDs for each document
+            chunks: List of document chunks with their metadata
+            document_id: Unique identifier for the document
+            base_metadata: Base metadata for the document
         """
-        if not ids:
-            # Generate simple IDs if none provided
-            ids = [f"doc_{i}" for i in range(len(texts))]
+        if not chunks:
+            raise ValueError("No chunks provided")
             
-        if not metadatas:
-            metadatas = [{} for _ in texts]
-        
+        if base_metadata is None:
+            base_metadata = {}
+            
         try:
-            print(f"Adding {len(texts)} documents to ChromaDB...")
+            texts = []
+            metadatas = []
+            ids = []
+            
+            for i, chunk in enumerate(chunks):
+                chunk_text = chunk["text"]
+                chunk_metadata = chunk["metadata"]
+                
+                # Combine base metadata with chunk metadata
+                combined_metadata = {
+                    **base_metadata,
+                    **chunk_metadata,
+                    "document_id": document_id  # Link chunk to parent document
+                }
+                
+                # Generate chunk ID using the chunk_index from metadata
+                chunk_id = f"{document_id}_chunk_{chunk_metadata.get('chunk_index', i)}"
+                
+                texts.append(chunk_text)
+                metadatas.append(combined_metadata)
+                ids.append(chunk_id)
+            
+            print(f"Adding {len(texts)} chunks for document {document_id}...")
             self.collection.add(
                 documents=texts,
                 metadatas=metadatas,
                 ids=ids
             )
-            print(f"Successfully added {len(texts)} documents to ChromaDB")
+            print(f"Successfully added {len(texts)} chunks")
+            
         except Exception as e:
-            print(f"Error adding documents to ChromaDB: {str(e)}")
-            # Try to fix permissions if we get a readonly error
+            print(f"Error adding document chunks: {str(e)}")
             if "readonly database" in str(e).lower():
                 self._fix_permissions()
-                # Retry the operation
-                print("Retrying document addition after fixing permissions...")
+                print("Retrying chunk addition after fixing permissions...")
                 self.collection.add(
                     documents=texts,
                     metadatas=metadatas,
@@ -178,46 +198,98 @@ class ChromaDBManager:
         self,
         query_text: str,
         n_results: int = 3,
-        where: Optional[Dict] = None
+        where: Optional[Dict] = None,
+        group_by_document: bool = True
     ) -> Dict:
         """
-        Query the collection to find similar documents
+        Query the collection to find similar chunks and optionally group by document.
         
         Args:
-            query_text (str): The query text
-            n_results (int): Number of results to return
-            where (Dict, optional): Filter conditions
+            query_text: The query text
+            n_results: Number of results to return
+            where: Filter conditions
+            group_by_document: Whether to group results by parent document
             
         Returns:
-            Dict: Query results containing documents and their metadata
+            Dict: Query results containing chunks and their metadata
         """
+        # Increase n_results when grouping to ensure we get enough unique documents
+        search_n_results = n_results * 3 if group_by_document else n_results
+        
         results = self.collection.query(
             query_texts=[query_text],
-            n_results=n_results,
-            where=where
+            n_results=search_n_results,
+            where=where,
+            include=["documents", "metadatas", "distances"]
         )
         
+        if not group_by_document:
+            return {
+                "ids": results["ids"][0],
+                "documents": results["documents"][0],
+                "metadatas": results["metadatas"][0],
+                "distances": results["distances"][0]
+            }
+            
+        # Group results by document_id
+        grouped_results = {}
+        for i, (chunk_id, text, metadata, distance) in enumerate(zip(
+            results["ids"][0],
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0]
+        )):
+            doc_id = metadata.get("document_id") if metadata else None
+            if doc_id not in grouped_results:
+                grouped_results[doc_id] = {
+                    "chunks": [],
+                    "metadata": {k: v for k, v in metadata.items() if not k.startswith("chunk_")},
+                    "best_distance": distance
+                }
+            grouped_results[doc_id]["chunks"].append({
+                "text": text,
+                "chunk_metadata": {k.replace("chunk_", ""): v for k, v in metadata.items() if k.startswith("chunk_")},
+                "distance": distance
+            })
+            
+        # Sort documents by best matching chunk
+        sorted_docs = sorted(
+            grouped_results.items(),
+            key=lambda x: x[1]["best_distance"]
+        )[:n_results]
+        
         return {
-            "ids": results["ids"][0],
-            "documents": results["documents"][0],
-            "metadatas": results["metadatas"][0],
-            "distances": results["distances"][0]
+            "results": [
+                {
+                    "document_id": doc_id,
+                    "metadata": doc_data["metadata"],
+                    "chunks": sorted(
+                        doc_data["chunks"],
+                        key=lambda x: x["distance"]
+                    ),
+                    "best_distance": doc_data["best_distance"]
+                }
+                for doc_id, doc_data in sorted_docs
+            ]
         }
 
     def delete_document(self, document_id: str) -> None:
-        """
-        Delete a document from the collection
-        
-        Args:
-            document_id (str): ID of the document to delete
-        """
+        """Delete all chunks belonging to a document."""
         try:
-            self.collection.delete(ids=[document_id])
+            # Find all chunks for this document
+            results = self.collection.get(
+                where={"document_id": document_id}
+            )
+            if results["ids"]:
+                self.collection.delete(
+                    ids=results["ids"]
+                )
         except Exception as e:
             if "readonly database" in str(e).lower():
                 self._fix_permissions()
-                # Retry the operation
-                self.collection.delete(ids=[document_id])
+                self.collection.delete(
+                    where={"document_id": document_id}
+                )
             else:
                 raise
 
@@ -228,11 +300,29 @@ class ChromaDBManager:
         Returns:
             Dict: Collection statistics
         """
-        return {
-            "count": self.collection.count(),
-            "name": self.collection.name,
-            "metadata": self.collection.metadata
-        }
+        try:
+            # Get total number of chunks
+            total_chunks = self.collection.count()
+            
+            # Get unique document count
+            results = self.collection.get(
+                include=["metadatas"]
+            )
+            unique_docs = len(set(
+                meta.get("document_id")
+                for meta in results["metadatas"]
+                if meta and "document_id" in meta
+            )) if results["metadatas"] else 0
+            
+            return {
+                "total_chunks": total_chunks,
+                "unique_documents": unique_docs,
+                "name": self.collection.name,
+                "metadata": self.collection.metadata
+            }
+        except Exception as e:
+            print(f"Error getting collection stats: {str(e)}")
+            raise
 
 # Example usage
 if __name__ == "__main__":
@@ -247,7 +337,7 @@ if __name__ == "__main__":
     ]
     
     # Add documents
-    db_manager.add_documents(sample_texts)
+    db_manager.add_document_chunks(sample_texts, "doc_1")
     
     # Query example
     results = db_manager.query_documents("Tell me about AI")
