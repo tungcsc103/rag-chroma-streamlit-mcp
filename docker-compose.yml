@@ -37,9 +37,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - rag-network
 
@@ -50,10 +51,11 @@ services:
     ports:
       - "8501:8501"
     environment:
-      - API_HOST=backend
-      - API_PORT=8001
+      - BACKEND_HOST=backend
+      - BACKEND_PORT=8001
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - rag-network

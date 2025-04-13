@@ -10,19 +10,19 @@ RUN apt-get update && apt-get install -y \
     software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
+# Copy requirements first for better caching
 COPY frontend-requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the frontend application
+# Copy source code
 COPY src/app.py /app/app.py
 
 # Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
+ENV BACKEND_HOST=backend
+ENV BACKEND_PORT=8001
 
-# Expose port for Streamlit
+# Expose Streamlit port
 EXPOSE 8501
 
-# Start Streamlit server
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"] 
+# Start Streamlit app
+CMD ["streamlit", "run", "app.py", "--server.address", "0.0.0.0"] 

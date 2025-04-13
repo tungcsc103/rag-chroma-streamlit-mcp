@@ -16,9 +16,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# Constants
-API_HOST = os.getenv("API_HOST", "localhost")
-API_PORT = os.getenv("API_PORT", "8001")
+# Get API URL from environment variables
+API_HOST = os.getenv('BACKEND_HOST', 'localhost')
+API_PORT = os.getenv('BACKEND_PORT', '8001')
 API_URL = f"http://{API_HOST}:{API_PORT}"
 
 def copy_to_clipboard(text):
